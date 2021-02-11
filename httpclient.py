@@ -22,7 +22,7 @@ import sys
 import socket
 import re
 # you may use urllib to encode data appropriately
-import urllib.parse
+import urllib.parse as u
 
 def help():
     print("httpclient.py [GET/POST] [URL]\n")
@@ -41,13 +41,17 @@ class HTTPClient(object):
         return None
 
     def get_code(self, data):
+        #From the data text, we get the first line (that is valid) and then grab the code
+        for line in data.split('\n'):
+            if 'HTTP/1' in line:
+                return int(line.split(" ")[1])
         return None
 
     def get_headers(self,data):
         return None
 
     def get_body(self, data):
-        return None
+        return data.split('\r\n')[-1]
     
     def sendall(self, data):
         self.socket.sendall(data.encode('utf-8'))
@@ -67,14 +71,57 @@ class HTTPClient(object):
                 done = not part
         return buffer.decode('utf-8')
 
+    def get_host_port_path(self, url):
+        #use urllib.parse.urlparse to save us some trouble
+        #source: https://docs.python.org/3/library/urllib.parse.html
+        url_parsed = u.urlparse(url)
+        host, port, path = url_parsed.hostname, url_parsed.port, url_parsed.path
+        if port == None:
+            port = 80
+        if path == '':
+            path = '/'
+        if url_parsed.query != '':
+            path += ('?' + url_parsed.query)
+        return (host,port, path)
+
     def GET(self, url, args=None):
         code = 500
         body = ""
+        (host, port, path) = self.get_host_port_path(url)
+
+        payload = f'GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n'
+
+        self.connect(host, port)
+        self.sendall(payload)
+
+
+        response = self.recvall(self.socket)
+        code = self.get_code(response)
+        body = self.get_body(response)
+
+        self.close()
+
         return HTTPResponse(code, body)
 
     def POST(self, url, args=None):
         code = 500
         body = ""
+        (host, port, path) = self.get_host_port_path(url)
+        if args == None:
+            content = ''
+        else:
+            content = u.urlencode(args)
+
+        payload = f'POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {len(content)}\r\nConnection: close\r\n\r\n{content}'
+
+        self.connect(host, port)
+        self.sendall(payload)
+        response = self.recvall(self.socket)
+        code = self.get_code(response)
+        body = self.get_body(response)
+
+        self.close()
+
         return HTTPResponse(code, body)
 
     def command(self, url, command="GET", args=None):
